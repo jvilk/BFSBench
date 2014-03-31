@@ -38,10 +38,12 @@ function createFile(num: number): void {
   var size: number = random() * avgSize, i: number,
     words: number = Math.floor(size / 4), contents = new Buffer(size);
   for (i = 0; i < words; i++) {
-    // Max unsigned integer
+    // Max unsigned integer.
+    // >>> 0 coerces the number into an *unsigned* integer.
     contents.writeUInt32LE((4294967295 * random()) >>> 0, i*4);
   }
   // Remainder.
+  // >>> 0 coerces the number into an *unsigned* integer.
   for (i = 0; i < size % 4; i++) {
     contents.writeUInt8((255 * random()) >>> 0, words * 4 + i);
   }
