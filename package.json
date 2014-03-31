@@ -22,7 +22,9 @@
     "node": ">= 0.10"
   },
   "devDependencies": {
-    "async": ">= 0.2.7",
-    "bower": "*"
+    "async": "~0.2",
+    "bower": "*",
+    "yargs": "~1.2",
+    "seed-random": "*"
   }
 }
