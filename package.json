@@ -1,0 +1,28 @@
+{
+  "name": "BFSBench",
+  "version": "0.0.1",
+  "description": "BrowserFS benchmark suite",
+  "keywords": [
+    "filesystem",
+    "storage",
+    "node",
+    "benchmark"
+  ],
+  "homepage": "https://github.com/jvilk/BFSBench",
+  "author": "John Vilk <jvilk@cs.umass.edu> (http://people.cs.umass.edu/~jvilk)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jvilk/BFSBench.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jvilk/BFSBench/issues"
+  },
+  "engines": {
+    "node": ">= 0.10"
+  },
+  "devDependencies": {
+    "async": ">= 0.2.7",
+    "bower": "*"
+  }
+}
