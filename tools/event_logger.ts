@@ -303,13 +303,11 @@ export class EventLog {
         assert(Buffer.isBuffer(arg2));
         assert(typeof arg3 === 'number');
         assert(typeof arg4 === 'number');
-        // XXX: Use max u32 as null sentinel
-        if (arg5 === null) {
-          arg5 = 4294967295;
-        }
-        assert(typeof arg5 === 'number');
+        assert(typeof arg5 === 'number' || arg5 === null);
         // Reduce this information to (fd, length, position).
-        this.recordEvent(new Event(type, this.getFdEvent(arg1), arg4, arg5));
+        // XXX: Use max u32 as null sentinel
+        this.recordEvent(new Event(type, this.getFdEvent(arg1), arg4,
+          arg5 === null ? 4294967295 : arg5));
         break;
       /* (path buff options?) */
       case EventType.writeFile:
@@ -331,7 +329,18 @@ export class EventLog {
         throw new Error("Invalid event type: " + type);
     }
     // Call the function.
-    var rv: any = fs[methodName](arg1, arg2, arg3, arg4, arg5);
+    var rv: any;
+    if (arg5 !== undefined) {
+      rv = fs[methodName](arg1, arg2, arg3, arg4, arg5);
+    } else if (arg4 !== undefined) {
+      rv = fs[methodName](arg1, arg2, arg3, arg4);
+    } else if (arg3 !== undefined) {
+      rv = fs[methodName](arg1, arg2, arg3);
+    } else if (arg2 !== undefined) {
+      rv = fs[methodName](arg1, arg2);
+    } else {
+      rv = fs[methodName](arg1);
+    }
     if (methodName === 'openSync') {
       // XXX: Decrement 1 from eventCount, since we are already recorded.
       this.registerFd(this.eventCount - 1, rv);
