@@ -183,12 +183,16 @@ export class EventLog {
   }
 
   public addString(str: string): number {
-    var buff: NodeBuffer;
+    var buff: NodeBuffer, lenBuff: NodeBuffer;
     // Check if present, otherwise write.
     if (this.stringPool[str] == null) {
       this.stringPool[str] = this.stringPoolPosition;
+      lenBuff = new Buffer(4);
       buff = new Buffer(str);
-      this.stringPoolPosition += buff.length;
+      lenBuff.writeUInt32LE(buff.length, 0);
+      this.stringPoolPosition += buff.length + 4;
+      // Prefix each string by its length.
+      this.stringPoolStream.write(lenBuff);
       this.stringPoolStream.write(buff);
     }
     return this.stringPool[str];
@@ -364,6 +368,9 @@ export class Event {
     } else {
       this.data = new Buffer(13);
       this.data.writeUInt8(td, 0);
+      if (typeof arg1 !== 'number') arg1 = 0;
+      if (typeof arg2 !== 'number') arg2 = 0;
+      if (typeof arg3 !== 'number') arg3 = 0;
       this.data.writeUInt32LE(arg1, 1);
       this.data.writeUInt32LE(arg2, 5);
       this.data.writeUInt32LE(arg3, 9);
