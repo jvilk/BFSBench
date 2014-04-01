@@ -194,7 +194,7 @@ export class EventLog {
     return this.stringPool[str];
   }
   public addPathString(p: string): number {
-    return this.addString(path.resolve(p));
+    return this.addString(path.relative('.', path.resolve(p)));
   }
 
   public registerFd(eventId: number, fd: number): void {
@@ -326,7 +326,8 @@ export class EventLog {
         this.recordEvent(new Event(type, this.addPathString(arg1), options2Number(arg2)));
         break;
       default:
-        throw new Error("Invalid event type: " + type);
+        console.log("Ignoring and forwarding event type: " + methodName);
+        break;
     }
     // Call the function.
     var rv: any;
