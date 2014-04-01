@@ -125,7 +125,7 @@ export function flagEnum2String(flag: FlagEnum): string {
 
 function options2Number(options: {flag: string; encoding: string}): number {
   var rv: number = 0;
-  if (options != null) {
+  if (options != null && typeof options !== 'function') {
     if (options.flag) {
       rv |= flag2Enum(options.flag);
       rv << 16;
@@ -148,32 +148,54 @@ export class EventLog {
   /**
    * Maps strings to their numerical IDs.
    */
-  private stringPool: {[name: string]: number} = {};
-  private stringPoolCount: number = 0;
+  private stringPool: { [name: string]: number } = {};
+  /**
+   * Current offset in the string pool file.
+   */
+  private stringPoolPosition: number = 0;
   private fdMap: {[eventId: number]: number} = {};
   /**
-   * File descriptor for the file holding the string pool.
-   * @todo Use a stream.
+   * Stream for the file holding the string pool.
    */
-  private stringPoolFd: number;
+  private stringPoolStream: fs.WriteStream;
   /**
-   * File descriptor for the file holding the events.
+   * Stream for the file holding the events.
    */
-  private eventFd: number;
-  constructor(fname: string) {
-    // @todo Open up a file for events.
-
-    // @todo Open up a file for strings.
+  private eventStream: fs.WriteStream;
+  /**
+   * Number of events thus far.
+   */
+  private eventCount: number = 0;
+  constructor(name: string) {
+    this.eventStream = fs.createWriteStream(name + '_events.dat', { flags: 'w' });
+    this.stringPoolStream = fs.createWriteStream(name + '_stringpool.dat', { flags: 'w' });
   }
+
+  public end(cb: Function = () => { }): void {
+    var counter: number = 2,
+      ourCb = () => {
+        if (--counter === 0) cb();
+      };
+    this.stringPoolStream.on('finish', ourCb);
+    this.eventStream.on('finish', ourCb);
+    this.stringPoolStream.end();
+    this.eventStream.end();
+  }
+
   public addString(str: string): number {
+    var buff: NodeBuffer;
     // Check if present, otherwise write.
     if (this.stringPool[str] == null) {
-      this.stringPool[str] = this.stringPoolCount++;
-      // @todo Write to file.
+      this.stringPool[str] = this.stringPoolPosition;
+      buff = new Buffer(str);
+      this.stringPoolPosition += buff.length;
+      this.stringPoolStream.write(buff);
     }
     return this.stringPool[str];
   }
-  public addPathString(p: string): number { return this.addString(path.resolve(p)); }
+  public addPathString(p: string): number {
+    return this.addString(path.resolve(p));
+  }
 
   public registerFd(eventId: number, fd: number): void {
     this.fdMap[fd] = eventId;
@@ -185,47 +207,55 @@ export class EventLog {
     return this.fdMap[fd];
   }
 
-  public addEvent(type: EventType, arg1: any, arg2?: any, arg3?: any, arg4?: any, arg5?: any): void {
-    var ev: Event = this._addEvent(type, arg1, arg2, arg3, arg4, arg5);
-    // Fix callback.
-    // Done.
+  private recordEvent(event: Event): void {
+    this.eventStream.write(event.data);
+    this.eventCount++;
   }
 
-  private _addEvent(type: EventType, arg1: any, arg2?: any, arg3?: any, arg4?: any, arg5?: any): Event {
-    switch(type) {
+  /**
+   * Logs this function call, and then returns the result from forwarding it to
+   * the true `fs` module.
+   */
+  public logEvent(methodName: string, arg1: any, arg2?: any, arg3?: any, arg4?: any, arg5?: any): any {
+    var type: EventType = EventType[methodName];
+    switch (type) {
       /* (path) */
       case EventType.stat:
-      case EventType.statSync:
       case EventType.lstat:
-      case EventType.lstatSync:
       case EventType.unlink:
-      case EventType.unlinkSync:
       case EventType.rmdir:
-      case EventType.rmdirSync:
       case EventType.readdir:
-      case EventType.readdirSync:
       case EventType.exists:
+      case EventType.statSync:
+      case EventType.lstatSync:
+      case EventType.unlinkSync:
+      case EventType.rmdirSync:
+      case EventType.readdirSync:
       case EventType.existsSync:
         assert(typeof arg1 === 'string');
-        return new Event(type, this.addPathString(arg1));
+        this.recordEvent(new Event(type, this.addPathString(arg1)));
+        break;
       /* (path, path) */
       case EventType.rename:
       case EventType.renameSync:
         assert(typeof arg1 === 'string');
         assert(typeof arg2 === 'string');
-        return new Event(type, this.addPathString(arg1), this.addPathString(arg2));
+        this.recordEvent(new Event(type, this.addPathString(arg1), this.addPathString(arg2)));
+        break;
       /* (fd, len) */
       case EventType.ftruncate:
       case EventType.ftruncateSync:
         assert(typeof arg1 === 'number');
         assert(typeof arg2 === 'number');
-        return new Event(type, this.getFdEvent(arg1), arg2);
+        this.recordEvent(new Event(type, this.getFdEvent(arg1), arg2));
+        break;
       /* (path, len) */
       case EventType.truncate:
       case EventType.truncateSync:
         assert(typeof arg1 === 'string');
         assert(typeof arg2 === 'number');
-        return new Event(type, this.addPathString(arg1), arg2);
+        this.recordEvent(new Event(type, this.addPathString(arg1), arg2));
+        break;
       /* (fd) */
       case EventType.fstat:
       case EventType.fstatSync:
@@ -234,18 +264,36 @@ export class EventLog {
       case EventType.fsync:
       case EventType.fstatSync:
         assert(typeof arg1 === 'number');
-        return new Event(type, this.getFdEvent(arg1));
+        this.recordEvent(new Event(type, this.getFdEvent(arg1)));
+        break;
       /* (path, mode?) */
       case EventType.mkdir:
       case EventType.mkdirSync:
         assert(typeof arg1 === 'string');
-        return new Event(type, this.addPathString(arg1), arg2);
+        this.recordEvent(new Event(type, this.addPathString(arg1), arg2));
+        break;
       /* (path flags mode?) */
       case EventType.open:
+        // Modify callback to capture fd.
+        var openCbCapture = (cb: Function): Function => {
+          var eventId = this.eventCount;
+          return (err, fd): void => {
+            if (!err) {
+              this.registerFd(eventId, fd);
+            }
+            cb(err, fd);
+          };
+        };
+        if (typeof arg3 === 'function') {
+          arg3 = openCbCapture(arg3);
+        } else if (typeof arg4 === 'function') {
+          arg4 = openCbCapture(arg4);
+        }
       case EventType.openSync:
         assert(typeof arg1 === 'string');
         assert(typeof arg2 === 'string');
-        return new Event(type, this.addPathString(arg1), flag2Enum(arg2), arg3);
+        this.recordEvent(new Event(type, this.addPathString(arg1), flag2Enum(arg2), typeof arg3 !== 'function' ? arg3 : undefined));
+        break;
       /* (fd buffer offset length position) */
       case EventType.read:
       case EventType.readSync:
@@ -261,7 +309,8 @@ export class EventLog {
         }
         assert(typeof arg5 === 'number');
         // Reduce this information to (fd, length, position).
-        return new Event(type, this.getFdEvent(arg1), arg4, arg5);
+        this.recordEvent(new Event(type, this.getFdEvent(arg1), arg4, arg5));
+        break;
       /* (path buff options?) */
       case EventType.writeFile:
       case EventType.writeFileSync:
@@ -270,19 +319,24 @@ export class EventLog {
         // Convert to path, length, options
         assert(typeof arg1 === 'string');
         assert(Buffer.isBuffer(arg2));
-        return new Event(type, this.addPathString(arg1), arg2.length, options2Number(arg3));
+        this.recordEvent(new Event(type, this.addPathString(arg1), arg2.length, options2Number(arg3)));
+        break;
       /* (path options?) */
       case EventType.readFile:
       case EventType.readFileSync:
         assert(typeof arg1 === 'string');
-        return new Event(type, this.addPathString(arg1), options2Number(arg2));
-      /* (eventId) */
-      case EventType.EVENT_END:
-        assert(typeof arg1 === 'number');
-        return new Event(type, arg1);
+        this.recordEvent(new Event(type, this.addPathString(arg1), options2Number(arg2)));
+        break;
       default:
         throw new Error("Invalid event type: " + type);
     }
+    // Call the function.
+    var rv: any = fs[methodName](arg1, arg2, arg3, arg4, arg5);
+    if (methodName === 'openSync') {
+      // XXX: Decrement 1 from eventCount, since we are already recorded.
+      this.registerFd(this.eventCount - 1, rv);
+    }
+    return rv;
   }
 }
 
