@@ -216,7 +216,7 @@ export class EventLog {
    * Logs this function call, and then returns the result from forwarding it to
    * the true `fs` module.
    */
-  public logEvent(methodName: string, arg1: any, arg2?: any, arg3?: any, arg4?: any, arg5?: any): any {
+  public logEvent(methodName: string, arg1: any, arg2?: any, arg3?: any, arg4?: any, arg5?: any, arg6?: any): any {
     var type: EventType = EventType[methodName];
     switch (type) {
       /* (path) */
@@ -331,7 +331,9 @@ export class EventLog {
     }
     // Call the function.
     var rv: any;
-    if (arg5 !== undefined) {
+    if (arg6 !== undefined) {
+      rv = fs[methodName](arg1, arg2, arg3, arg4, arg5, arg6);
+    } else if (arg5 !== undefined) {
       rv = fs[methodName](arg1, arg2, arg3, arg4, arg5);
     } else if (arg4 !== undefined) {
       rv = fs[methodName](arg1, arg2, arg3, arg4);
