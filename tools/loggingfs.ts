@@ -10,8 +10,8 @@ import fs = require('fs');
 var log = new event_logger.EventLog('dataLog'), loggingFs = {}, prop;
 
 Object.keys(fs).forEach((prop) => {
-  loggingFs[prop] = () => {
-    return log.logEvent.apply(log, arguments);
+  loggingFs[prop] = (...args) => {
+    return log.logEvent.apply(log, [prop].concat(<any>args));
   };
 });
 
