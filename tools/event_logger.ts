@@ -28,9 +28,9 @@ export enum EventType {
   readFile, readFileSync,
   writeFile, writeFileSync,
   appendFile, appendFileSync,
-  exists, existsSync,
+  exists, existsSync
   /* Logging events */
-  EVENT_END // Used for asynchronous events.
+  // EVENT_END // Used for asynchronous events.
 }
 
 export enum EncodingType {
@@ -142,6 +142,162 @@ export function number2Options(opts: number): {flag: string; encoding: string} {
     flag: flagEnum2String(opts >>> 16),
     encoding: encodingType2Str(opts & 0xFFFF)
   };
+}
+
+enum ReplayerStatus { RUNNING, SUSPENDED }
+
+export class EventReplay {
+  private stringPool: NodeBuffer;
+  private currentEvent: number = -1;
+  private events: Event[];
+  private status: ReplayerStatus = ReplayerStatus.SUSPENDED;
+  /**
+   * All of the paths that are currently involved in FS events, including those
+   * involved in FDs.
+   * Instead of using the actual path, we use the path id to save space.
+   * We don't care about the value stored for each path; this is used as a set.
+   */
+  private lockedPaths: {[path: number]: any} = {};
+  /**
+   * All of the file descriptors that are currently involved in FS events.
+   * We map from the eventId in which they are created to both the path and
+   * fd number.
+   */
+  private activeFds: {[eventId: number]: {path: number; fd: number}} = {};
+
+  constructor(name: string) {
+    var counter: number = 2;
+    fs.readFile(name + '_events.dat', (err, buff: NodeBuffer): void => {
+      if (err) throw err;
+      this.processEvents(buff);
+      if (--counter === 0) this.ready();
+    });
+    fs.readFile(name + '_stringpool.dat', (err, buff: NodeBuffer): void => {
+      if (err) throw err;
+      this.stringPool = buff;
+      if (--counter === 0) this.ready();
+    });
+  }
+
+  public getCurrentEventId(): number { return this.currentEvent; }
+
+  public getString(stringId: number): string {
+    var stringLength: number = this.stringPool.readUInt32LE(stringId);
+    return this.stringPool.toString('utf8', stringId+4, stringId+4+stringLength);
+  }
+
+  public lockPath(stringId: number): void {
+    if (this.lockedPaths.hasOwnProperty(""+stringId)) {
+      throw new Error("Path " + stringId + " is already locked.");
+    } else {
+      this.lockedPaths[stringId] = null;
+    }
+  }
+
+  /**
+   * Attempts to lock all of the specified paths.
+   * If one of the paths cannot be locked, it locks nothing and throws an
+   * exception.
+   */
+  public lockPaths(stringIds: number[]): void {
+    var i: number;
+    try {
+      for (i = 0; i < stringIds.length; i++) {
+        this.lockPath(stringIds[i])
+      }
+    } catch (e) {
+      // Unlock everything locked thus far -- abort!
+      this.unlockPaths(stringIds.slice(0, i-1));
+      throw e;
+    }
+  }
+
+  public lookupFd(eventId: number): number {
+    if (!this.activeFds.hasOwnProperty(""+eventId)) {
+      throw new Error("fd for event " + eventId + " does not exist.");
+    }
+    return this.activeFds[eventId].fd;
+  }
+
+  public unlockPath(stringId: number): void {
+    if (this.lockedPaths.hasOwnProperty(""+stringId)) {
+      delete this.lockedPaths[stringId];
+    } else {
+      throw new Error("Path " + stringId + " is not locked!");
+    }
+  }
+
+  /**
+   * Unlocks all of the specified paths. It is a fatal error if the replayer
+   * attempts to unlock something that is not locked.
+   */
+  public unlockPaths(stringIds: number[]): void {
+    var i: number;
+    for (i = 0; i < stringIds.length; i++) {
+      this.unlockPath(stringIds[i]);
+    }
+  }
+
+  public registerFd(eventId: number, fd: number, stringId: number): void {
+    if (this.activeFds.hasOwnProperty(""+eventId)) {
+      throw new Error("Event " + eventId + " already has a file descriptor registered.");
+    }
+    this.activeFds[eventId] = {fd: fd, path: stringId};
+  }
+
+  public lockFd(eventId: number): void {
+    if (!this.activeFds.hasOwnProperty(""+eventId)) {
+      throw new Error("fd for event " + eventId + " does not exist.");
+    }
+    var eventDetails = this.activeFds[eventId];
+    this.lockPath(eventDetails.path);
+  }
+
+  public unlockFd(eventId: number): void {
+    if (!this.activeFds.hasOwnProperty(""+eventId)) {
+      throw new Error("fd for event " + eventId + " does not exist.");
+    }
+    var eventDetails = this.activeFds[eventId];
+    this.unlockPath(eventDetails.path);
+  }
+
+  public unregisterFd(eventId: number): void {
+    if (this.activeFds.hasOwnProperty(""+eventId)) {
+      // Ensure it's unlocked before removing.
+      try {
+        this.unlockFd(eventId);
+      } catch (e) {}
+      delete this.activeFds[eventId];
+    } else {
+      throw new Error("fd for event " + eventId + " does not exist.");
+    }
+  }
+
+  private processEvents(buff: NodeBuffer): void {
+    // Segment into 13-byte slices, create events for each.
+    // @todo This could be done lazily...
+    var numEvents: number = buff.length / 13, i: number, offset: number;
+    // Assertion: buff.length should divide evenly by 13.
+    assert(numEvents === (numEvents >>> 0));
+    this.events = new Array(numEvents);
+    for (i = 0; i < numEvents; i++) {
+      offset = i*13;
+      this.events[i] = new Event(buff.slice(offset, offset+13))
+    }
+  }
+
+  /**
+   * Called once the string pool and events are ready and processed.
+   */
+  private ready(): void {
+    if (this.status === ReplayerStatus.SUSPENDED) {
+      this.status = ReplayerStatus.RUNNING;
+      // Keep running events until we are blocked.
+
+      // Suspend.
+      this.status = ReplayerStatus.SUSPENDED;
+    }
+  }
 }
 
 export class EventLog {
@@ -296,7 +452,7 @@ export class EventLog {
       case EventType.openSync:
         assert(typeof arg1 === 'string');
         assert(typeof arg2 === 'string');
-        this.recordEvent(new Event(type, this.addPathString(arg1), flag2Enum(arg2), typeof arg3 !== 'function' ? arg3 : undefined));
+        this.recordEvent(new Event(type, this.addPathString(arg1), flag2Enum(arg2), arg3));
         break;
       /* (fd buffer offset length position) */
       case EventType.read:
@@ -380,4 +536,159 @@ export class Event {
   public arg1(): number { return this.data.readUInt32LE(1); }
   public arg2(): number { return this.data.readUInt32LE(5); }
   public arg3(): number { return this.data.readUInt32LE(9); }
+
+  public run(replayer: EventReplay) {
+    var type: EventType = this.type(), args: any[], lockCb: Function,
+      arg1: number = this.arg1(), arg2: number = this.arg2(),
+      arg3: number = this.arg3(), lockFd: number = -1, lockPaths: number[],
+      methodName: string = EventType[type];
+
+    /**
+     * Handles locking the specified paths. Returns a CB to be passed to an
+     * async function, *or* that should be called once a sync function finishes.
+     */
+    function handleLocking(lockFd: number, lockPaths: number[]): Function {
+      var eventId = replayer.getCurrentEventId();
+      if (lockFd > -1) {
+        replayer.lockFd(lockFd);
+      } else {
+        // This will throw if any lock fails.
+        replayer.lockPaths(lockPaths);
+      }
+      return (err, arg1) => {
+        if (err) console.log("Received error: " + err);
+
+        if (lockFd > -1) {
+          replayer.unlockFd(lockFd);
+        } else {
+          replayer.unlockPaths(lockPaths);
+        }
+
+        if (!err) {
+          switch (type) {
+            case EventType.open:
+            case EventType.openSync:
+              replayer.registerFd(eventId, arg1, lockPaths[0]);
+              break;
+            case EventType.close:
+            case EventType.closeSync:
+              replayer.unregisterFd(lockFd);
+              break;
+            default:
+              break;
+          }
+        }
+      };
+    }
+
+    // Lock resources and prepare arguments.
+    switch (type) {
+      /* (path) */
+      case EventType.stat:
+      case EventType.lstat:
+      case EventType.unlink:
+      case EventType.rmdir:
+      case EventType.readdir:
+      case EventType.exists:
+      case EventType.statSync:
+      case EventType.lstatSync:
+      case EventType.unlinkSync:
+      case EventType.rmdirSync:
+      case EventType.readdirSync:
+      case EventType.existsSync:
+        args = [replayer.getString(arg1)];
+        lockPaths = [arg1];
+        break;
+      /* (path, path) */
+      case EventType.rename:
+      case EventType.renameSync:
+        args = [replayer.getString(arg1), replayer.getString(arg2)];
+        lockPaths = [arg1, arg2];
+        break;
+      /* (fd, len) */
+      case EventType.ftruncate:
+      case EventType.ftruncateSync:
+        args = [replayer.lookupFd(arg1), arg2];
+        lockFd = arg1;
+        break;
+      /* (path, len) */
+      case EventType.truncate:
+      case EventType.truncateSync:
+        args = [replayer.getString(arg1), arg2];
+        lockPaths = [arg1];
+        break;
+      /* (fd) */
+      case EventType.fstat:
+      case EventType.fstatSync:
+      case EventType.close:
+      case EventType.closeSync:
+      case EventType.fsync:
+      case EventType.fstatSync:
+        args = [replayer.lookupFd(arg1)];
+        lockFd = arg1;
+        break;
+      /* (path, mode?) */
+      case EventType.mkdir:
+      case EventType.mkdirSync:
+        lockPaths = [arg1];
+        args = [replayer.getString(arg1)];
+        if (arg2 > 0) args.push(arg2);
+        break;
+      /* (path flags mode?) */
+      case EventType.open:
+      case EventType.openSync:
+        lockPaths = [arg1];
+        args = [replayer.getString(arg1), flagEnum2String(arg2)];
+        if (arg3 > 0) args.push(arg3);
+        break;
+      /* (fd buffer offset length position) */
+      case EventType.read:
+      case EventType.readSync:
+      case EventType.write:
+      case EventType.writeSync:
+        lockFd = arg1;
+        // XXX: We use max u32 as a null sentinel.
+        if (arg3 === 4294967295) arg3 = null;
+        args = [replayer.lookupFd(arg1), new Buffer(arg2), 0, arg2, arg3];
+        break;
+      /* (path buff options?) */
+      case EventType.writeFile:
+      case EventType.writeFileSync:
+      case EventType.appendFile:
+      case EventType.appendFileSync:
+        // Convert from path, length, options
+        lockPaths = [arg1];
+        args = [replayer.getString(arg1), new Buffer(arg2)];
+        if (arg3 > 0) {
+          args.push(number2Options(arg3));
+        }
+        break;
+      /* (path options?) */
+      case EventType.readFile:
+      case EventType.readFileSync:
+        lockPaths = [arg1];
+        args = [replayer.getString(arg1)];
+        if (arg2 > 0) {
+          args.push(number2Options(arg2));
+        }
+        break;
+      default:
+        console.log("Ignoring and forwarding event type: " + methodName);
+        break;
+    }
+    lockCb = handleLocking(lockFd, lockPaths);
+    if (methodName.indexOf('Sync') === -1) {
+      // Asynchronous.
+      args.push(lockCb);
+    }
+    // Call function with prepared arguments.
+    try {
+      fs[methodName].apply(fs, args);
+    } finally {
+      // Unlock resources for synchronous events.
+      if (methodName.indexOf('Sync') !== -1) {
+        lockCb();
+      }
+    }
+  }
 }
