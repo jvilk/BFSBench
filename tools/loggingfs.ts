@@ -26,10 +26,10 @@ class FakeWriteStream {
     var uberBuffer: NodeBuffer = Buffer.concat(this.data, this.size);
     $.ajax({
        url: '/BFSWriteFile/' + this.fname,
-       type: 'POST',
-       contentType: 'application/octet-stream',
-       data: (<any>uberBuffer).getBufferCore().buff,
-       processData: false
+       type: 'PUT',
+       contentType: 'application/json',
+       data: JSON.stringify({data: uberBuffer.toString('binary')}),
+       dataType: 'json'
     }).done(() => {
       if (typeof(this.endCb) !== 'undefined') {
         this.endCb();

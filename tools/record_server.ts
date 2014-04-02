@@ -12,10 +12,9 @@ app.use(express.static(root))
 app.use(express.json());
 app.all('/BFSWriteFile/*', function (req, res) {
   // Append body to file.
-  console.log(req);
-  console.log(req.body);
+  fs.writeFileSync(__dirname + req.url, new Buffer(req.body.data, 'binary'));
+  res.send({status: 'ok'});
 });
-
 
 app.listen(8080);
 console.log("Listening on port 8080.");

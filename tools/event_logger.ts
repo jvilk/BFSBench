@@ -196,8 +196,10 @@ export class EventReplay {
   public getCurrentEventId(): number { return this.currentEvent; }
 
   public getString(stringId: number): string {
-    var stringLength: number = this.stringPool.readUInt32LE(stringId);
-    return this.stringPool.toString('utf8', stringId+4, stringId+4+stringLength);
+    var stringLength: number = this.stringPool.readUInt32LE(stringId),
+      str = this.stringPool.toString('utf8', stringId+4, stringId+4+stringLength);
+    // '.' gets replaced with '' in the string pool.
+    return str === '' ? '.' : str;
   }
 
   public lockPath(stringId: number): void {
