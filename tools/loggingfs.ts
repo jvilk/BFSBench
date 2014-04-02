@@ -6,6 +6,45 @@
  */
 import event_logger = require('./event_logger');
 import fs = require('fs');
+declare var BrowserFS;
+declare var $;
+
+class FakeWriteStream {
+  private endCb: Function;
+  private data: NodeBuffer[] = [];
+  private size: number = 0;
+  constructor(private fname: string) {}
+  public write(data: NodeBuffer): void {
+    this.size += data.length;
+    this.data.push(data);
+  }
+  public on(eventName: string, cb: Function): void {
+    if (eventName === 'end') this.endCb = cb;
+  }
+  public end(): void {
+    // Write out the data!
+    var uberBuffer: NodeBuffer = Buffer.concat(this.data, this.size);
+    $.ajax({
+       url: '/BFSWriteFile/' + this.fname,
+       type: 'POST',
+       contentType: 'application/octet-stream',
+       data: (<any>uberBuffer).getBufferCore().buff,
+       processData: false
+    }).done(() => {
+      if (typeof(this.endCb) !== 'undefined') {
+        this.endCb();
+      }
+    });
+  }
+}
+
+// BrowserFS hack.
+if (typeof BrowserFS !== 'undefined') {
+  // Emulate createWriteStream.
+  fs['createWriteStream'] = function(fname: string) {
+    return new FakeWriteStream(fname);
+  };
+}
 
 var log = new event_logger.EventLog('dataLog'), loggingFs = {}, prop;
 

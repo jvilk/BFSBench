@@ -25,6 +25,7 @@
     "async": "~0.2",
     "bower": "*",
     "yargs": "~1.2",
-    "seed-random": "*"
+    "seed-random": "*",
+    "express": "*"
   }
 }
