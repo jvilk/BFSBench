@@ -1,7 +1,7 @@
 requirejs.config({
     paths: {
-        fs: './fs',
-        path: './path',
-        assert: './assert'
+        fs: '../tools/fs',
+        path: '../tools/path',
+        assert: '../tools/assert'
     }
 });
