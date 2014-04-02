@@ -144,6 +144,14 @@ export function number2Options(opts: number): {flag: string; encoding: string} {
   };
 }
 
+function getStackTrace(): string {
+  try {
+    throw new Error();
+  } catch (e) {
+    return e.stack;
+  }
+}
+
 enum ReplayerStatus { RUNNING, SUSPENDED }
 
 var getTime: () => number = (() => {
@@ -213,15 +221,15 @@ export class EventReplay {
       }
     } catch (e) {
       // Unlock everything locked thus far -- abort!
-      this.unlockPaths(stringIds.slice(0, i-1));
+      if (i > 0) {
+        this.unlockPaths(stringIds.slice(0, i));
+      }
       throw e;
     }
   }
 
   public lookupFd(eventId: number): number {
-    if (!this.activeFds.hasOwnProperty(""+eventId)) {
-      throw new Error("fd for event " + eventId + " does not exist.");
-    }
+    this.assertFdExists(eventId);
     return this.activeFds[eventId].fd;
   }
 
@@ -244,25 +252,31 @@ export class EventReplay {
     }
   }
 
-  public registerFd(eventId: number, fd: number, stringId: number): void {
+  private assertFdExists(eventId: number): void {
+    if (!this.activeFds.hasOwnProperty(""+eventId)) {
+      throw new Error("fd for event " + eventId + " does not exist.");
+    }
+  }
+
+  private assertFdMissing(eventId: number): void {
     if (this.activeFds.hasOwnProperty(""+eventId)) {
       throw new Error("Event " + eventId + " already has a file descriptor registered.");
     }
+  }
+
+  public registerFd(eventId: number, fd: number, stringId: number): void {
+    this.assertFdMissing(eventId);
     this.activeFds[eventId] = {fd: fd, path: stringId};
   }
 
   public lockFd(eventId: number): void {
-    if (!this.activeFds.hasOwnProperty(""+eventId)) {
-      throw new Error("fd for event " + eventId + " does not exist.");
-    }
+    this.assertFdExists(eventId);
     var eventDetails = this.activeFds[eventId];
     this.lockPath(eventDetails.path);
   }
 
   public unlockFd(eventId: number): void {
-    if (!this.activeFds.hasOwnProperty(""+eventId)) {
-      throw new Error("fd for event " + eventId + " does not exist.");
-    }
+    this.assertFdExists(eventId);
     var eventDetails = this.activeFds[eventId];
     this.unlockPath(eventDetails.path);
   }
@@ -309,18 +323,13 @@ export class EventReplay {
         // Exception means we should suspend. Ignore and suspend.
       }
 
-      if (this.currentEvent < this.events.length) {
-        this.status = ReplayerStatus.SUSPENDED;
-      } else {
-        // Benchmark over!
-        this.end();
-      }
+      this.status = ReplayerStatus.SUSPENDED;
     }
   }
 
-  private end(): void {
+  public end(): void {
+    assert(this.currentEvent === this.events.length);
     this.endTime = getTime();
-    console.log("Benchmark took " + (this.endTime - this.startTime) + " ms.");
   }
 }
 

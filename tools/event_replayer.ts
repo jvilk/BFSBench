@@ -9,3 +9,7 @@ if (argv.length !== 4) {
 
 process.chdir(argv[3]);
 var replayer = new event_logger.EventReplay(argv[2]);
+
+process.on('exit', () => {
+  replayer.end();
+});
