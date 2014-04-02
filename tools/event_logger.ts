@@ -580,6 +580,11 @@ export class Event {
         replayer.lockPaths(lockPaths);
       }
       return (err, arg1) => {
+        if (type === EventType.exists) {
+          arg1 = err;
+          err = undefined;
+        }
+
         if (err) console.log("Received error: " + err);
 
         if (lockFd > -1) {
@@ -709,12 +714,15 @@ export class Event {
       args.push(lockCb);
     }
     // Call function with prepared arguments.
+    var rv: any, err: any;
     try {
-      fs[methodName].apply(fs, args);
+      rv = fs[methodName].apply(fs, args);
+    } catch (e) {
+      err = e;
     } finally {
       // Unlock resources for synchronous events.
       if (methodName.indexOf('Sync') !== -1) {
-        lockCb();
+        lockCb(err, rv);
       }
     }
   }
