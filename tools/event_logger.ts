@@ -146,11 +146,17 @@ export function number2Options(opts: number): {flag: string; encoding: string} {
 
 enum ReplayerStatus { RUNNING, SUSPENDED }
 
+var getTime: () => number = (() => {
+  return typeof performance !== 'undefined' ? () => { return performance.now(); } : () => { return Date.now(); };
+})();
+
 export class EventReplay {
   private stringPool: NodeBuffer;
-  private currentEvent: number = -1;
+  private currentEvent: number = 0;
   private events: Event[];
   private status: ReplayerStatus = ReplayerStatus.SUSPENDED;
+  private startTime: number;
+  private endTime: number;
   /**
    * All of the paths that are currently involved in FS events, including those
    * involved in FDs.
@@ -170,12 +176,12 @@ export class EventReplay {
     fs.readFile(name + '_events.dat', (err, buff: NodeBuffer): void => {
       if (err) throw err;
       this.processEvents(buff);
-      if (--counter === 0) this.ready();
+      if (--counter === 0) this.start();
     });
     fs.readFile(name + '_stringpool.dat', (err, buff: NodeBuffer): void => {
       if (err) throw err;
       this.stringPool = buff;
-      if (--counter === 0) this.ready();
+      if (--counter === 0) this.start();
     });
   }
 
@@ -286,17 +292,35 @@ export class EventReplay {
     }
   }
 
-  /**
-   * Called once the string pool and events are ready and processed.
-   */
-  private ready(): void {
+  private start(): void {
+    this.startTime = getTime();
+    this.ready();
+  }
+
+  public ready(): void {
     if (this.status === ReplayerStatus.SUSPENDED) {
       this.status = ReplayerStatus.RUNNING;
       // Keep running events until we are blocked.
+      try {
+        for (; this.currentEvent < this.events.length; this.currentEvent++) {
+          this.events[this.currentEvent].run(this);
+        }
+      } catch (e) {
+        // Exception means we should suspend. Ignore and suspend.
+      }
 
-      // Suspend.
-      this.status = ReplayerStatus.SUSPENDED;
+      if (this.currentEvent < this.events.length) {
+        this.status = ReplayerStatus.SUSPENDED;
+      } else {
+        // Benchmark over!
+        this.end();
+      }
     }
+  }
+
+  private end(): void {
+    this.endTime = getTime();
+    console.log("Benchmark took " + (this.endTime - this.startTime) + " ms.");
   }
 }
 
@@ -578,6 +602,9 @@ export class Event {
               break;
           }
         }
+        // In case the replayer is paused... this will resume it. Or cause it to
+        // try to resume, at least.
+        replayer.ready();
       };
     }
 
