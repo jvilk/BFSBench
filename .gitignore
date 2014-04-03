@@ -1,5 +1,9 @@
+.DS_Store
 lib/*
 !lib/README.md
 tools/*.js
 test/fixtures/**/*
 !test/fixtures/README.md
+node_modules
+*.dat
+
