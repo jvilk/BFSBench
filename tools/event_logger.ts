@@ -258,7 +258,12 @@ export class EventReplay {
 
   private assertFdExists(eventId: number): void {
     if (!this.activeFds.hasOwnProperty(""+eventId)) {
-      throw new Error("fd for event " + eventId + " does not exist.");
+      var append = "";
+      if (eventId < this.events.length && eventId >= 0) {
+        var event: Event = this.events[eventId];
+        append = event.toString(this);
+      }
+      throw new Error("fd for event " + eventId + " does not exist. " + append);
     }
   }
 
@@ -271,6 +276,7 @@ export class EventReplay {
   public registerFd(eventId: number, fd: number, stringId: number): void {
     this.assertFdMissing(eventId);
     this.activeFds[eventId] = {fd: fd, path: stringId};
+    console.log('Opened ' + this.getString(stringId));
   }
 
   public lockFd(eventId: number): void {
@@ -291,6 +297,7 @@ export class EventReplay {
       try {
         this.unlockFd(eventId);
       } catch (e) {}
+      console.log('Closed ' + this.getString(this.activeFds[eventId].path));
       delete this.activeFds[eventId];
     } else {
       throw new Error("fd for event " + eventId + " does not exist.");
@@ -325,6 +332,7 @@ export class EventReplay {
         }
       } catch (e) {
         // Exception means we should suspend. Ignore and suspend.
+        console.log("Received exception: " + e + '\n' + e.stack);
       }
 
       this.status = ReplayerStatus.SUSPENDED;
@@ -332,7 +340,18 @@ export class EventReplay {
   }
 
   public end(): void {
-    assert(this.currentEvent === this.events.length);
+    if (this.currentEvent !== this.events.length) {
+      var event: Event = this.events[this.currentEvent];
+      console.log('Execution ended on event ' + this.currentEvent + '/' + this.events.length);
+      console.log('Problematic event is: ');
+      console.log(EventType[event.type()] + '(' + event.arg1() + ', ' + event.arg2() + ', ' + event.arg3() + ')');
+      console.log('Next event is: ' + this.events[this.currentEvent+1].toString(this));
+      console.log('Current locks: ' + JSON.stringify(Object.keys(this.lockedPaths)));
+      console.log('Current fds: ');
+      for (var fd in this.activeFds) {
+        console.log(fd + ' => ' + this.getString(this.activeFds[fd].path));
+      }
+    }
     this.endTime = getTime();
   }
 }
@@ -573,6 +592,17 @@ export class Event {
   public arg1(): number { return this.data.readUInt32LE(1); }
   public arg2(): number { return this.data.readUInt32LE(5); }
   public arg3(): number { return this.data.readUInt32LE(9); }
+
+  public toString(replayer: EventReplay): string {
+    var pathStr = "" + this.arg1();
+    try {
+      pathStr = replayer.getString(this.arg1());
+    } catch(e) {
+      //
+    }
+    return EventType[this.type()] + '(' + pathStr + ', ' + this.arg2() + ', '
+      + this.arg3() + ')';
+  }
 
   public run(replayer: EventReplay) {
     var type: EventType = this.type(), args: any[], lockCb: Function,
