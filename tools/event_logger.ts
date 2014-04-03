@@ -1,10 +1,12 @@
 /// <reference path="../lib/DefinitelyTyped/node/node.d.ts" />
+/// <amd-dependency path="buffer" />
 /**
  * LoggingFS event logger API.
  */
 import assert = require('assert');
 import path = require('path');
 import fs = require('fs');
+var Buffer = require('buffer').Buffer;
 
 /**
  * Event types.
@@ -440,7 +442,7 @@ export class EventLog {
       /* (fd, len) */
       case EventType.ftruncate:
       case EventType.ftruncateSync:
-        assert(typeof arg1 === 'number');
+        //assert(typeof arg1 === 'number');
         assert(typeof arg2 === 'number');
         this.recordEvent(new Event(type, this.getFdEvent(arg1), arg2));
         break;
@@ -458,7 +460,7 @@ export class EventLog {
       case EventType.closeSync:
       case EventType.fsync:
       case EventType.fstatSync:
-        assert(typeof arg1 === 'number');
+        //assert(typeof arg1 === 'number');
         this.recordEvent(new Event(type, this.getFdEvent(arg1)));
         break;
       /* (path, mode?) */
@@ -494,7 +496,7 @@ export class EventLog {
       case EventType.readSync:
       case EventType.write:
       case EventType.writeSync:
-        assert(typeof arg1 === 'number');
+        //assert(typeof arg1 === 'number');
         assert(Buffer.isBuffer(arg2));
         assert(typeof arg3 === 'number');
         assert(typeof arg4 === 'number');

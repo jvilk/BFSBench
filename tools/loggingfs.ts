@@ -1,4 +1,5 @@
 /// <reference path="../lib/DefinitelyTyped/node/node.d.ts" />
+/// <amd-dependency path="buffer" />
 /**
  * LoggingFS
  * A wrapper for Node's file system that efficiently logs all file system
@@ -6,8 +7,8 @@
  */
 import event_logger = require('./event_logger');
 import fs = require('fs');
+var Buffer = require('buffer').Buffer;
 declare var BrowserFS;
-declare var $;
 
 class FakeWriteStream {
   private endCb: Function;
@@ -24,17 +25,17 @@ class FakeWriteStream {
   public end(): void {
     // Write out the data!
     var uberBuffer: NodeBuffer = Buffer.concat(this.data, this.size);
-    $.ajax({
-       url: '/BFSWriteFile/' + this.fname,
-       type: 'PUT',
-       contentType: 'application/json',
-       data: JSON.stringify({data: uberBuffer.toString('binary')}),
-       dataType: 'json'
-    }).done(() => {
-      if (typeof(this.endCb) !== 'undefined') {
-        this.endCb();
+    var xhr = new XMLHttpRequest();
+    xhr.open('PUT', '/BFSWriteFile/' + this.fname, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === 4) {
+        if (typeof(this.endCb) !== 'undefined') {
+          this.endCb();
+        }
       }
-    });
+    };
+    xhr.send(JSON.stringify({data: uberBuffer.toString('binary')}));
   }
 }
 

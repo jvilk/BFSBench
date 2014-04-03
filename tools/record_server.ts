@@ -9,7 +9,7 @@ var app = express(),
   root = process.cwd();
 
 app.use(express.static(root))
-app.use(express.json());
+app.use(express.json({limit: '50mb'}));
 app.all('/BFSWriteFile/*', function (req, res) {
   // Append body to file.
   fs.writeFileSync(__dirname + req.url, new Buffer(req.body.data, 'binary'));
