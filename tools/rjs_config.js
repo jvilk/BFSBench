@@ -1,7 +1,7 @@
 {
     name: '../lib/almond/almond',
     baseurl: '.',
-    include: ['loggingfs'],
+    include: ['../browser/loggingfs'],
     paths: {
         fs: '../tools/fs',
         path: '../tools/path',

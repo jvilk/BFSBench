@@ -179,19 +179,20 @@ export class EventReplay {
    * We map from the eventId in which they are created to both the path and
    * fd number.
    */
-  private activeFds: {[eventId: number]: {path: number; fd: number}} = {};
+  private activeFds: { [eventId: number]: { path: number; fd: number } } = {};
+  private eventsLeft: number;
 
-  constructor(name: string) {
+  constructor(name: string, private endCb: Function = () => { }) {
     var counter: number = 2;
     fs.readFile(name + '_events.dat', (err, buff: NodeBuffer): void => {
       if (err) throw err;
       this.processEvents(buff);
       if (--counter === 0) this.start();
-    });
-    fs.readFile(name + '_stringpool.dat', (err, buff: NodeBuffer): void => {
-      if (err) throw err;
-      this.stringPool = buff;
-      if (--counter === 0) this.start();
+      fs.readFile(name + '_stringpool.dat', (err, buff: NodeBuffer): void => {
+        if (err) throw err;
+        this.stringPool = buff;
+        if (--counter === 0) this.start();
+      });
     });
   }
 
@@ -199,7 +200,12 @@ export class EventReplay {
 
   public getString(stringId: number): string {
     var stringLength: number = this.stringPool.readUInt32LE(stringId),
-      str = this.stringPool.toString('utf8', stringId+4, stringId+4+stringLength);
+      str = this.stringPool.toString('utf8', stringId + 4, stringId + 4 + stringLength);
+    // XXX: Fix for javap benchmark.
+    var badDir: string = "../../../doppio_really_upstream/doppio/build/release-cli/";
+    if (str.indexOf(badDir) === 0) {
+      str = str.slice(badDir.length);
+    }
     // '.' gets replaced with '' in the string pool.
     return str === '' ? '.' : str;
   }
@@ -276,7 +282,7 @@ export class EventReplay {
   public registerFd(eventId: number, fd: number, stringId: number): void {
     this.assertFdMissing(eventId);
     this.activeFds[eventId] = {fd: fd, path: stringId};
-    console.log('Opened ' + this.getString(stringId));
+    //console.log('Opened ' + this.getString(stringId));
   }
 
   public lockFd(eventId: number): void {
@@ -297,10 +303,16 @@ export class EventReplay {
       try {
         this.unlockFd(eventId);
       } catch (e) {}
-      console.log('Closed ' + this.getString(this.activeFds[eventId].path));
+      //console.log('Closed ' + this.getString(this.activeFds[eventId].path));
       delete this.activeFds[eventId];
     } else {
       throw new Error("fd for event " + eventId + " does not exist.");
+    }
+  }
+
+  public endEvent() {
+    if (--this.eventsLeft === 0) {
+      this.end();
     }
   }
 
@@ -313,8 +325,19 @@ export class EventReplay {
     this.events = new Array(numEvents);
     for (i = 0; i < numEvents; i++) {
       offset = i*13;
-      this.events[i] = new Event(buff.slice(offset, offset+13))
+      this.events[i] = new Event(buff.slice(offset, offset + 13));
+      switch (this.events[i].type()) {
+        case EventType.open:
+        case EventType.openSync:
+        case EventType.readFile:
+        case EventType.readFileSync:
+        case EventType.stat:
+        case EventType.statSync:
+          console.log(this.events[i].toString(this));
+          break;
+      }
     }
+    this.eventsLeft = this.events.length;
   }
 
   private start(): void {
@@ -332,7 +355,7 @@ export class EventReplay {
         }
       } catch (e) {
         // Exception means we should suspend. Ignore and suspend.
-        console.log("Received exception: " + e + '\n' + e.stack);
+        // console.log("Received exception: " + e + '\n' + e.stack);
       }
 
       this.status = ReplayerStatus.SUSPENDED;
@@ -340,19 +363,26 @@ export class EventReplay {
   }
 
   public end(): void {
-    if (this.currentEvent !== this.events.length) {
-      var event: Event = this.events[this.currentEvent];
-      console.log('Execution ended on event ' + this.currentEvent + '/' + this.events.length);
-      console.log('Problematic event is: ');
-      console.log(EventType[event.type()] + '(' + event.arg1() + ', ' + event.arg2() + ', ' + event.arg3() + ')');
-      console.log('Next event is: ' + this.events[this.currentEvent+1].toString(this));
-      console.log('Current locks: ' + JSON.stringify(Object.keys(this.lockedPaths)));
-      console.log('Current fds: ');
-      for (var fd in this.activeFds) {
-        console.log(fd + ' => ' + this.getString(this.activeFds[fd].path));
-      }
-    }
     this.endTime = getTime();
+    // Fixes issues when last event is synchronous. If we didn't do this, the
+    // event loop would not register the last event and we would think we ended
+    // prematurely.
+    setTimeout(() => {
+      if (this.currentEvent !== this.events.length) {
+        var event: Event = this.events[this.currentEvent];
+        console.log('Execution ended on event ' + this.currentEvent + '/' + this.events.length);
+        console.log('Problematic event is: ');
+        console.log(EventType[event.type()] + '(' + event.arg1() + ', ' + event.arg2() + ', ' + event.arg3() + ')');
+        console.log('Next event is: ' + this.events[this.currentEvent + 1].toString(this));
+        console.log('Current locks: ' + JSON.stringify(Object.keys(this.lockedPaths)));
+        console.log('Current fds: ');
+        for (var fd in this.activeFds) {
+          console.log(fd + ' => ' + this.getString(this.activeFds[fd].path));
+        }
+      }
+      console.log("Total time elapsed: " + (this.endTime - this.startTime) + " ms");
+      this.endCb(this.endTime - this.startTime);
+    }, 4);
   }
 }
 
@@ -628,7 +658,7 @@ export class Event {
           err = undefined;
         }
 
-        if (err) console.log("Received error: " + err);
+        // if (err) console.log("Received error: " + err);
 
         if (lockFd > -1) {
           replayer.unlockFd(lockFd);
@@ -653,6 +683,7 @@ export class Event {
         // In case the replayer is paused... this will resume it. Or cause it to
         // try to resume, at least.
         replayer.ready();
+        replayer.endEvent();
       };
     }
 
