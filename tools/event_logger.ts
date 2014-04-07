@@ -326,16 +326,6 @@ export class EventReplay {
     for (i = 0; i < numEvents; i++) {
       offset = i*13;
       this.events[i] = new Event(buff.slice(offset, offset + 13));
-      switch (this.events[i].type()) {
-        case EventType.open:
-        case EventType.openSync:
-        case EventType.readFile:
-        case EventType.readFileSync:
-        case EventType.stat:
-        case EventType.statSync:
-          console.log(this.events[i].toString(this));
-          break;
-      }
     }
     this.eventsLeft = this.events.length;
   }
