@@ -1,6 +1,5 @@
 {
     name: '../lib/almond/almond',
-    baseurl: '.',
     include: ['loggingfs'],
     baseUrl: '../browser',
     paths: {
@@ -15,5 +14,5 @@
     wrap: {
         start: "(function() {",
         end: "self.loggingfs = require('loggingfs');}());"
-    },
+    }
 }
