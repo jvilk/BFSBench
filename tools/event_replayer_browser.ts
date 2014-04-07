@@ -9,7 +9,7 @@ declare var setImmediate: (cb: Function) => void;
 BrowserFS.install(window);
 window['results'] = {};
 
-var backends: string[] = ['idbfs'],
+var backends: string[] = ['xhrfs'],
   cache_configs: { [name: string]: () => any } = {
     'none': function() {
       return undefined;
@@ -23,8 +23,8 @@ var backends: string[] = ['idbfs'],
   },
   replays: number = 4,
   benchmarks: { [name: string]: string[] } = {
-    'bananabread': ['bananabread_arena', 'bananabread_lavarooms']
-    //'latex': ['latex_stabilizer', 'latex_stabilizer']
+    'bananabread': ['bananabread_arena', 'bananabread_lavarooms'],
+    'latex': ['latex_stabilizer', 'latex_stabilizer']
   }, idbfs: any;
 
 function write_file(src: string, dest: string, cb: Function) {
@@ -127,11 +127,12 @@ function instantiate_backend(type: string, cache: any, cb: Function): void {
   }
 }
 
-function run_benchmark_config(backend_type: string, name: string, configs: string[], cache_name: string, cache: any, cb: Function) {
-  var time: number = 0, onConfig: number = 0, onReplay: number = 0;
+function run_benchmark_config(backend_type: string, name: string, configs: string[], cache_name: string, cb: Function) {
+  var time: number = 0, onConfig: number = 0, onReplay: number = 0,
+    cache_type = cache_configs[cache_name];
   results[backend_type][name][cache_name] = [];
 
-  function next_config(cb: Function) {
+  function next_config(cache: any, cb: Function) {
     if (onConfig === configs.length) {
       console.log(backend_type + ' ' + name + ' ' + cache_name + ' ' + time + ' [' + (cache != null ? cache.hitRate() : 0) + ']');
       results[backend_type][name][cache_name].push((cache != null ? cache.hitRate() : 0), time);
@@ -142,7 +143,7 @@ function run_benchmark_config(backend_type: string, name: string, configs: strin
       onConfig++;
       new event_logger.EventReplay(nextConfig, function (t2) {
         time += t2;
-        setImmediate(() => { next_config(cb); });
+        setImmediate(() => { next_config(cache, cb); });
       });
     }
   }
@@ -153,14 +154,15 @@ function run_benchmark_config(backend_type: string, name: string, configs: strin
     } else {
       onReplay++;
       onConfig = 0;
-      next_config(next_replay);
+      var cache = cache_type();
+      instantiate_backend(backend_type, cache, (backend) => {
+        BrowserFS.initialize(backend);
+        next_config(cache, next_replay);
+      });
     }
   }
 
-  instantiate_backend(backend_type, cache, (backend) => {
-    BrowserFS.initialize(backend);
-    next_replay();
-  });
+  next_replay();
 }
 
 function run_benchmark(backend_type: string, name: string, configs: string[], cb: Function) {
@@ -177,7 +179,7 @@ function run_benchmark(backend_type: string, name: string, configs: string[], cb
       } else {
         var cacheName: string = cacheNames[onCache];
         onCache++;
-        run_benchmark_config(backend_type, name, configs, cacheName, cache_configs[cacheName](), next_cache);
+        run_benchmark_config(backend_type, name, configs, cacheName, next_cache);
       }
     }
     next_cache();
@@ -215,3 +217,43 @@ function next_backend() {
 
 // KICK OFF!
 next_backend();
+
+window['produceCsv'] = (obj: any): string => {
+  // Each level of obj is a new column until you hit an array.
+  function process_values(values: number[]): string[][] {
+    var rv: string[][] = [], i: number;
+    for (i = 0; i < values.length; i++) {
+      // Next two values are a row.
+      rv.push([''+values[i], ''+values[i + 1]]);
+      i++;
+    }
+    return rv;
+  }
+
+  function process_level(name: string, level: any): string[][] {
+    var i: number, rv: string[][];
+    if (Array.isArray(level)) {
+      rv = process_values(level);
+    } else {
+      rv = [];
+      Object.keys(level).forEach((val) => {
+        var rv2: string[][] = process_level(val, level[val]);
+        rv = rv.concat(rv2);
+      });
+    }
+    // Append this level to each.
+    if (name !== '') {
+      for (i = 0; i < rv.length; i++) {
+        rv[i].unshift(name);
+      }
+    }
+    return rv;
+  }
+
+  var csv = process_level('', obj), i: number,
+    csv2: string[] = [];
+  for (i = 0; i < csv.length; i++) {
+    csv2.push(csv[i].join(','));
+  }
+  return csv2.join('\n');
+};
