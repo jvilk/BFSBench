@@ -24,18 +24,45 @@ class FakeWriteStream {
   }
   public end(): void {
     // Write out the data!
-    var uberBuffer: NodeBuffer = Buffer.concat(this.data, this.size);
-    var xhr = new XMLHttpRequest();
-    xhr.open('PUT', '/BFSWriteFile/' + this.fname, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState === 4) {
-        if (typeof(this.endCb) !== 'undefined') {
-          this.endCb();
+    var currSlice: number = 0,
+      sliceSize: number = 5000,
+      nextSlice = () => {
+        if (currSlice < this.data.length) {
+          // Send the slice!
+          // We don't really need to make a slice, but I do so to neatly handle
+          // the end case where slice.length < sliceSize.
+          var slice: NodeBuffer[] = this.data.slice(currSlice, currSlice + sliceSize),
+            i: number, data: string = "";
+          for (i = 0; i < slice.length; i++) {
+            data += slice[i].toString('binary');
+          }
+          currSlice += sliceSize;
+
+          // Send the slice.
+          var xhr = new XMLHttpRequest();
+          xhr.open('PUT', '/BFSWriteFile/' + this.fname, true);
+          xhr.setRequestHeader('Content-Type', 'application/json');
+          xhr.onreadystatechange = () => {
+            console.log(this.fname + ': ' + currSlice + '/' + this.data.length + ' - ' + xhr.readyState);
+            if (xhr.readyState === 4) {
+              nextSlice();
+            }
+          };
+          xhr.send(JSON.stringify({data: data}));
+        } else {
+          // Done.
+          var xhr = new XMLHttpRequest();
+          xhr.open('PUT', '/BFSEndFile/' + this.fname, false);
+          xhr.setRequestHeader('Content-Type', 'application/json');
+          xhr.send();
+          console.log(this.fname + ': Done.');
+          if (typeof(this.endCb) !== 'undefined') {
+            this.endCb();
+          }
         }
-      }
-    };
-    xhr.send(JSON.stringify({data: uberBuffer.toString('binary')}));
+      };
+    // Kick off.
+    nextSlice();
   }
 }
 
