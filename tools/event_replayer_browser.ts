@@ -9,7 +9,7 @@ declare var setImmediate: (cb: Function) => void;
 BrowserFS.install(window);
 window['results'] = {};
 
-var backends: string[] = ['xhrfs', 'idbfs'],
+var backends: string[] = ['idbfs'],
   cache_configs: { [name: string]: () => any } = {
     'none': function() {
       return undefined;
@@ -28,12 +28,17 @@ var backends: string[] = ['xhrfs', 'idbfs'],
   }, idbfs: any;
 
 function write_file(src: string, dest: string, cb: Function) {
-  fs.readFile(src, (e, data: NodeBuffer) => {
-    if (e) throw e;
-    fs.writeFile(dest, data, (e) => {
-      if (e) throw e;
-      cb();
-    });
+  fs.exists(src, (val) => {
+    if (val) cb();
+    else {
+      fs.readFile(src, (e, data: NodeBuffer) => {
+        if (e) throw e;
+        fs.writeFile(dest, data, (e) => {
+          if (e) throw e;
+          cb();
+        });
+      });
+    }
   });
 }
 
@@ -56,9 +61,14 @@ function write_directory(src: string, dest: string, cb: Function) {
 function write_path(src: string, dest: string, cb: Function) {
   fs.stat(src, (e, stats: fs.Stats) => {
     if (stats.isDirectory()) {
-      fs.mkdir(dest, (e?) => {
-        if (e) throw e;
-        write_directory(src, dest, cb);
+      fs.exists(dest, (val) => {
+        if (val) write_directory(src, dest, cb);
+        else {
+          fs.mkdir(dest, (e?) => {
+            if (e) throw e;
+            write_directory(src, dest, cb);
+          });
+        }
       });
     } else {
       write_file(src, dest, cb);
@@ -70,7 +80,7 @@ function write_path(src: string, dest: string, cb: Function) {
  * Called when the backend should be preloaded with all of the files.
  * Returns nothing.
  */
-function preload_backend(type: string, cb: Function): void {
+function preload_backend(type: string, benchmark: string, cb: Function): void {
   switch(type) {
     case 'xhrfs':
       // NOP.
@@ -84,8 +94,8 @@ function preload_backend(type: string, cb: Function): void {
         var mfs = new BrowserFS.FileSystem.MountableFileSystem();
         mfs.mount('/xhrfs', new BrowserFS.FileSystem.XmlHttpRequest('./listings.json', '.'));
         mfs.mount('/idbfs', idbfs);
-        BrowserFS.instantiate(mfs);
-        write_directory('/xhrfs', '/idbfs', () => {
+        BrowserFS.initialize(mfs);
+        write_path('/xhrfs/' + benchmark, '/idbfs/' + benchmark, () => {
           cb();
         });
       }, 'benchmark');
@@ -108,7 +118,7 @@ function instantiate_backend(type: string, cache: any, cb: Function): void {
       return;
     case 'idbfs':
       setImmediate(() => {
-        idbfs.resetCache(cache);
+        if (cache != null) idbfs.resetCache(cache);
         cb(idbfs);
       });
       return;
@@ -157,40 +167,39 @@ function run_benchmark(backend_type: string, name: string, configs: string[], cb
   var cacheNames: string[] = Object.keys(cache_configs),
     onCache: number = 0;
   results[backend_type][name] = {};
-  process.chdir(name);
-  // Iterate through cache types!
-  function next_cache() {
-    if (onCache === cacheNames.length) {
-      process.chdir('..');
-      setImmediate(cb);
-    } else {
-      var cacheName: string = cacheNames[onCache];
-      onCache++;
-      run_benchmark_config(backend_type, name, configs, cacheName, cache_configs[cacheName](), next_cache);
+  preload_backend(backend_type, name, () => {
+    process.chdir(name);
+    // Iterate through cache types!
+    function next_cache() {
+      if (onCache === cacheNames.length) {
+        process.chdir('..');
+        setImmediate(cb);
+      } else {
+        var cacheName: string = cacheNames[onCache];
+        onCache++;
+        run_benchmark_config(backend_type, name, configs, cacheName, cache_configs[cacheName](), next_cache);
+      }
     }
-  }
-  next_cache();
+    next_cache();
+  });
 }
 
 function run_backend(backend_type: string, cb: Function) {
   results[backend_type] = {};
-  // Prepare the backend!
-  preload_backend(backend_type, () => {
-    // Perform each benchmark!
-    var benchmarkNames: string[] =  Object.keys(benchmarks),
-      onBenchmark: number = 0;
+  // Perform each benchmark!
+  var benchmarkNames: string[] =  Object.keys(benchmarks),
+    onBenchmark: number = 0;
 
-    function next_benchmark() {
-      if (onBenchmark === benchmarkNames.length) {
-        setImmediate(cb);
-      } else {
-        var benchmarkName = benchmarkNames[onBenchmark];
-        onBenchmark++;
-        run_benchmark(backend_type, benchmarkName, benchmarks[benchmarkName], next_benchmark);
-      }
+  function next_benchmark() {
+    if (onBenchmark === benchmarkNames.length) {
+      setImmediate(cb);
+    } else {
+      var benchmarkName = benchmarkNames[onBenchmark];
+      onBenchmark++;
+      run_benchmark(backend_type, benchmarkName, benchmarks[benchmarkName], next_benchmark);
     }
-    next_benchmark();
-  });
+  }
+  next_benchmark();
 }
 
 var onBackend: number = 0;

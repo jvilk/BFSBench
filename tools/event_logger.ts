@@ -8,6 +8,8 @@ import path = require('path');
 import fs = require('fs');
 var Buffer = require('buffer').Buffer;
 
+declare var BrowserFS;
+
 /**
  * Event types.
  */
@@ -181,6 +183,7 @@ export class EventReplay {
    */
   private activeFds: { [eventId: number]: { path: number; fd: number } } = {};
   private eventsLeft: number;
+  public sync2async: boolean = BrowserFS && (!(<any>fs).getRootFS().supportsSynch());
 
   constructor(name: string, private endCb: Function = () => { }) {
     var counter: number = 2;
@@ -326,6 +329,7 @@ export class EventReplay {
     for (i = 0; i < numEvents; i++) {
       offset = i*13;
       this.events[i] = new Event(buff.slice(offset, offset + 13));
+      if (this.sync2async) this.events[i].makeAsync();
     }
     this.eventsLeft = this.events.length;
   }
@@ -606,6 +610,14 @@ export class Event {
       this.data.writeUInt32LE(arg1, 1);
       this.data.writeUInt32LE(arg2, 5);
       this.data.writeUInt32LE(arg3, 9);
+    }
+  }
+  public makeAsync(): void {
+    var typeName: string = EventType[this.type()];
+    if (typeName.indexOf('Sync') !== -1) {
+      var newType: EventType = EventType[typeName.slice(0, typeName.length - 4)];
+      assert(newType !== null && newType !== undefined);
+      this.data.writeUInt8(newType, 0);
     }
   }
   public type(): EventType { return this.data.readUInt8(0); }
