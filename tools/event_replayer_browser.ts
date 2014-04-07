@@ -7,7 +7,7 @@ declare var InMemoryCache;
 declare var results;
 declare var setImmediate: (cb: Function) => void;
 BrowserFS.install(window);
-window['results'] = [];
+window['results'] = {};
 
 var backends: string[] = ['xhrfs', 'idbfs'],
   cache_configs: { [name: string]: () => any } = {
@@ -23,8 +23,8 @@ var backends: string[] = ['xhrfs', 'idbfs'],
   },
   replays: number = 4,
   benchmarks: { [name: string]: string[] } = {
-    'bananabread': ['bananabread_arena', 'bananabread_lavarooms'],
-    'latex': ['latex_stabilizer', 'latex_stabilizer']
+    'bananabread': ['bananabread_arena', 'bananabread_lavarooms']
+    //'latex': ['latex_stabilizer', 'latex_stabilizer']
   }, idbfs: any;
 
 function write_file(src: string, dest: string, cb: Function) {
@@ -125,13 +125,14 @@ function run_benchmark_config(backend_type: string, name: string, configs: strin
     if (onConfig === configs.length) {
       console.log(backend_type + ' ' + name + ' ' + cache_name + ' ' + time + ' [' + (cache != null ? cache.hitRate() : 0) + ']');
       results[backend_type][name][cache_name].push((cache != null ? cache.hitRate() : 0), time);
+      time = 0;
       setImmediate(cb);
     } else {
       var nextConfig: string = configs[onConfig];
       onConfig++;
       new event_logger.EventReplay(nextConfig, function (t2) {
         time += t2;
-        setImmediate(next_config);
+        setImmediate(() => { next_config(cb); });
       });
     }
   }
