@@ -183,7 +183,7 @@ export class EventReplay {
    */
   private activeFds: { [eventId: number]: { path: number; fd: number } } = {};
   private eventsLeft: number;
-  public sync2async: boolean = BrowserFS && (!(<any>fs).getRootFS().supportsSynch());
+  public sync2async: boolean = typeof BrowserFS !== 'undefined' && (!(<any>fs).getRootFS().supportsSynch());
 
   constructor(name: string, private endCb: Function = () => { }) {
     var counter: number = 2;
