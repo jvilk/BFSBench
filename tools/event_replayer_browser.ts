@@ -28,7 +28,7 @@ var backends: string[] = ['idbfs'],
   }, idbfs: any;
 
 function write_file(src: string, dest: string, cb: Function) {
-  fs.exists(src, (val) => {
+  fs.exists(dest, (val) => {
     if (val) cb();
     else {
       fs.readFile(src, (e, data: NodeBuffer) => {
